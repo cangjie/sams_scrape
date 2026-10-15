@@ -14,6 +14,14 @@ import scrape  # noqa: E402
 import site_images  # noqa: E402
 
 
+
+def fake_page(lines):
+    """基准布局（383×834）上的一页：表头「销量」在 y=257、底部标签栏在 y=778，外加给定的行 (x, y, w, 文字)。"""
+    base = [(264, 257, 30, "销量"), (180, 778, 20, "发现"), (328, 779, 20, "我的")]
+    raw = {"width": 383, "height": 834, "listHash": "", "lines": [
+        dict(x=x, y=y, w=w, h=14, conf=1.0, text=t, fg=[0, 0, 0], bg=[255, 255, 255]) for x, y, w, t in base + lines]}
+    return scrape.Page(raw)
+
 class SiteImagesTest(unittest.TestCase):
     def test_trim_square_centers_content(self):
         im = Image.new("RGB", (100, 100), "white")
@@ -37,11 +45,52 @@ class SiteImagesTest(unittest.TestCase):
         self.assertEqual(Image.open(io.BytesIO(v["t"])).size, (200, 200))
         self.assertEqual(Image.open(io.BytesIO(v["l"])).size, (600, 600))
 
-    def test_find_card_fuzzy_same_price(self):
-        cards = [dict(title="洋河 52度 海之蓝儿", price=269.9, y=461), dict(title="汾酒 青花20", price=419.9, y=557)]
-        self.assertEqual(site_images.find_card(cards, "洋河52度 海之蓝 1L", 269.9)["y"], 461)
-        self.assertIsNone(site_images.find_card(cards, "洋河52度 海之蓝 1L", 239.9))
-        self.assertIsNone(site_images.find_card(cards, "茅台飞天", 269.9))
+    def test_head_score(self):
+        n = scrape.norm
+        self.assertEqual(site_images.head_score(n("光明 如实高蛋白希"), n("光明 如实高蛋白希腊发酵乳 135gx10")), 1.0)
+        self.assertGreaterEqual(site_images.head_score(n("仅铁吧可售 MM 红油串串"), n("MM 红油串串")), 0.9)
+        self.assertLess(site_images.head_score(n("东升 香菜125g"), n("洪湖粉藕 1kg")), 0.8)
+        self.assertEqual(site_images.head_score("1k", n("1kg 鸡蛋")), 0.0)
+
+    def test_locate_card_uses_price_below(self):
+        page = fake_page([(188, 400, 120, "MM 澳洲牛排 1kg"), (189, 460, 40, "¥99"),
+                          (188, 520, 120, "MM 澳洲牛排 2kg"), (189, 580, 40, "¥199")])
+        self.assertEqual(site_images.locate_card(page, "MM 澳洲牛排 2kg", 199.0)["y"], 520)
+        self.assertEqual(site_images.locate_card(page, "MM 澳洲牛排 1kg", 99.0)["y"], 400)
+
+    def test_locate_card_ignores_spec_number_as_price(self):
+        page = fake_page([(188, 400, 120, "植村秀琥珀卸妆油"), (187, 420, 40, "450ml"),
+                          (188, 520, 120, "植村秀琥珀卸妆油"), (189, 580, 40, "¥450")])
+        self.assertEqual(site_images.locate_card(page, "植村秀琥珀卸妆油450ml", 450.0)["y"], 520)
+
+    def test_locate_card_ambiguous_without_price_returns_none(self):
+        page = fake_page([(192, 400, 130, "全球购 BURBERRY博柏利 翻领"), (192, 520, 130, "全球购 BURBERRY博柏利 翻领")])
+        self.assertIsNone(site_images.locate_card(page, "BURBERRY博柏利 翻领短袖POLO衫", 1999.0))
+
+    def test_locate_card_image_must_be_fully_visible(self):
+        top = fake_page([(188, 280, 120, "洪湖粉藕 1kg"), (189, 340, 40, "¥739")])        # 图上沿伸到表头里
+        bottom = fake_page([(188, 720, 120, "洪湖粉藕 1kg"), (189, 750, 40, "¥739")])     # 图下沿伸到底部标签栏里
+        self.assertIsNone(site_images.locate_card(top, "洪湖粉藕 1kg", 739.0))
+        self.assertIsNone(site_images.locate_card(bottom, "洪湖粉藕 1kg", 739.0))
+
+    def test_crop_for_cards_the_old_rules_missed(self):
+        """这台笔记本（macOS 13）上按原解析规则找不到的真实商品：价格行太矮、标题横坐标差一点、
+        标题前多了标签、图片上的字和标题并成一行、全球购卡上没识别出价格。"""
+        cases = [("洪湖粉藕 1kg", 739.0, "肉蛋果蔬/00386.png"),
+                 ("美都西瓜 1个", 49.8, "肉蛋果蔬/00434.png"),
+                 ("MM 红油串串", 29.9, "速食冷冻/00035.png"),
+                 ("五粮液2021年产小五粮 浓香型白酒52度 375mL", 219.9, "酒水饮料/00018.png"),
+                 ("植村秀琥珀卸妆油450ml", 430.0, "个护美妆/00053.png")]
+        for title, price, shot in cases:
+            with self.subTest(title=title):
+                data = site_images.crop_for({"members": [dict(title=title, price=price, shot=shot)]})
+                self.assertIsNotNone(data)
+                im = Image.open(io.BytesIO(data))
+                self.assertEqual(im.size[0], im.size[1])
+
+    def test_crop_for_product_not_in_shot(self):
+        rec = dict(title="茅台 飞天 53度 500mL", price=1499.0, shot="肉蛋果蔬/00386.png")
+        self.assertIsNone(site_images.crop_for({"members": [rec]}))
 
     def test_ocr_cache_follows_content(self):
         calls = []

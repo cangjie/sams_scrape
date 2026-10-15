@@ -16,6 +16,9 @@ JD_SIZES = {"t": 200, "l": 600}
 CARD_IMG = scrape.LIST_X_MIN - scrape.IMG_X_MIN     # 商品图那一列的宽度（基准布局坐标，85）
 IMG_ABOVE = 14                                      # 商品图上沿在标题上方多少（基准布局坐标）
 WHITE = 245                                         # 比这更白的算背景
+TEXT_X = scrape.LIST_X_MIN + 15                     # 标题行要伸进文字列
+LINE_X_MIN = 140                                    # 再往左是图片列里的角标、「补货中」
+PRICE_BELOW = 110                                   # 价格在标题下方多远以内（基准布局坐标）
 
 
 def jpeg_bytes(im, quality=82):
@@ -65,27 +68,57 @@ def ocr_raw(path):
     return raw
 
 
-def find_card(cards, title, price):
-    """截图里对应这个商品的那张卡：价格相同，标题一样或八成像（同 scrape.Store.find 的规则），取最像的。"""
-    n, best = scrape.norm(title), None
-    for c in cards:
-        if c["price"] != price:
-            continue
-        m = scrape.norm(c["title"])
-        r = 1.0 if m == n else difflib.SequenceMatcher(None, m, n).ratio()
-        if r >= 0.8 and (best is None or r > best[0]):
-            best = (r, c)
-    return best[1] if best else None
+def head_score(line, title):
+    """line 是识别出的一行、title 是商品标题（都已 scrape.norm）。标题的开头出现在这一行里有多像（0～1）。
+    行前面可以多几个字（「自提」「仅餐吧可售」、图片上的字和标题并成了一行），行也可以只有标题的前半截（标题折行）。"""
+    best = 0.0
+    for s in range(len(line)):
+        sub = line[s:]
+        if len(sub) < (3 if s == 0 else 4):
+            break
+        best = max(best, difflib.SequenceMatcher(None, sub, title[:len(sub)]).ratio())
+    return best
 
 
-def visible_cards(page):
-    """本页商品图完整露出的卡：图的上沿在表头下面，下沿在底部标签栏上面。"""
+def is_price_line(l):
+    """红色或以 ¥ 开头的价格行。规格里的「450ml」不算。"""
+    return (scrape.kind(l) == "red" or l["text"][:1] in "¥￥") and scrape.price_of(l) is not None
+
+
+def locate_card(page, title, price):
+    """在一页截图里找这个商品的卡，返回 {"y": 标题行的 y}（基准布局坐标）；找不到或拿不准返回 None。
+
+    不用 scrape.parse_cards：它的规则是按 Mac mini 的识别结果调的，换台机器（这台 Intel 笔记本，macOS 13）
+    价格行矮了一点、标题横坐标差了一点就整张卡丢掉。这里只要求：
+    - 标题的开头出现在某一行里（相似度 ≥ 0.8），这一行伸进文字列；
+    - 这行下方有同样的价格；或者价格没对上但标题相似度 ≥ 0.9（全球购的卡在这台机器上识别不出价格）。
+      价格没对上时，若另有一行几乎一样像（同系列的几款），拿不准，不配图；
+    - 商品图完整露出：上沿在表头下面，下沿在底部标签栏上面。"""
     hdr, tab = page.header(), page.tab_y()
     if hdr is None or tab is None:
-        return []
-    top = hdr["y"] + hdr["h"]
-    return [c for c in scrape.parse_cards(page, at_top=True, strict=False)
-            if c["y"] - IMG_ABOVE >= top and c["y"] - IMG_ABOVE + CARD_IMG <= tab]
+        return None
+    top, n = hdr["y"] + hdr["h"], scrape.norm(title)
+    prices = [p for p in page.lines if is_price_line(p)]
+    cands = []
+    for l in page.lines:
+        if l["x"] < LINE_X_MIN or l["x"] >= scrape.LIST_X_MAX or l["x"] + l["w"] < TEXT_X:
+            continue
+        r = head_score(scrape.norm(l["text"]), n)
+        if r < 0.8:
+            continue
+        price_ok = any(0 < p["y"] - l["y"] < PRICE_BELOW and scrape.price_of(p) == price for p in prices)
+        if price_ok or r >= 0.9:
+            cands.append((price_ok, r, l))
+    if not cands:
+        return None
+    cands.sort(key=lambda c: (c[0], c[1]), reverse=True)
+    price_ok, r, l = cands[0]
+    if not price_ok and len(cands) > 1 and cands[1][1] >= r - 0.02:
+        return None
+    y0 = l["y"] - IMG_ABOVE
+    if y0 < top or y0 + CARD_IMG > tab:
+        return None
+    return {"y": round(l["y"])}
 
 
 def crop_card(shot_img, card):
@@ -106,7 +139,7 @@ def crop_for(product):
         raw = ocr_raw(path)
         if raw is None:
             continue
-        card = find_card(visible_cards(scrape.Page(raw, path)), m["title"], m["price"])
+        card = locate_card(scrape.Page(raw, path), m["title"], m["price"])
         if card is None:
             continue
         im = crop_card(Image.open(path).convert("RGB"), card)
