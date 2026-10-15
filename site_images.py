@@ -19,6 +19,8 @@ WHITE = 245                                         # 比这更白的算背景
 TEXT_X = scrape.LIST_X_MIN + 15                     # 标题行要伸进文字列
 LINE_X_MIN = 140                                    # 再往左是图片列里的角标、「补货中」
 PRICE_BELOW = 110                                   # 价格在标题下方多远以内（基准布局坐标）
+SECOND_LINE = (8, 30)                               # 标题折行的第二行在第一行下方多远
+SIBLING_GAP = 30                                    # 两个候选行相距超过这么多，才算不同的卡
 
 
 def jpeg_bytes(im, quality=82):
@@ -85,6 +87,25 @@ def is_price_line(l):
     return (scrape.kind(l) == "red" or l["text"][:1] in "¥￥") and scrape.price_of(l) is not None
 
 
+def title_text(page, l):
+    """一张卡的标题：第一行 l，加上紧挨在它下面的黑字行（标题折行）。"""
+    below = sorted((x for x in page.lines if x is not l and SECOND_LINE[0] < x["y"] - l["y"] < SECOND_LINE[1]
+                    and LINE_X_MIN <= x["x"] < scrape.LIST_X_MAX and scrape.kind(x) == "black"),
+                   key=lambda x: (x["y"], x["x"]))
+    return l["text"] + "".join(x["text"] for x in below)
+
+
+def full_score(text, title):
+    """整段标题（都已 scrape.norm）和商品标题有多像（0～1）；标题前面可以多几个字（「线上专享」等标签）。"""
+    best = 0.0
+    for s in range(len(text)):
+        sub = text[s:]
+        if len(sub) < 4:
+            break
+        best = max(best, difflib.SequenceMatcher(None, sub, title).ratio())
+    return best
+
+
 def locate_card(page, title, price):
     """在一页截图里找这个商品的卡，返回 {"y": 标题行的 y}（基准布局坐标）；找不到或拿不准返回 None。
 
@@ -92,7 +113,8 @@ def locate_card(page, title, price):
     价格行矮了一点、标题横坐标差了一点就整张卡丢掉。这里只要求：
     - 标题的开头出现在某一行里（相似度 ≥ 0.8），这一行伸进文字列；
     - 这行下方有同样的价格；或者价格没对上但标题相似度 ≥ 0.9（全球购的卡在这台机器上识别不出价格）。
-      价格没对上时，若另有一行几乎一样像（同系列的几款），拿不准，不配图；
+    - 另一张卡的第一行一样像、价格也一样（同系列的几款，如 ASKO 烘衣机 / 洗衣机都是 ¥9,999）：
+      把标题第二行拼上再比；还分不出来就不配图——占位图比别人的图好；
     - 商品图完整露出：上沿在表头下面，下沿在底部标签栏上面。"""
     hdr, tab = page.header(), page.tab_y()
     if hdr is None or tab is None:
@@ -113,8 +135,13 @@ def locate_card(page, title, price):
         return None
     cands.sort(key=lambda c: (c[0], c[1]), reverse=True)
     price_ok, r, l = cands[0]
-    if not price_ok and len(cands) > 1 and cands[1][1] >= r - 0.02:
-        return None
+    rivals = [c for c in cands[1:] if c[0] == price_ok and c[1] >= r - 0.02 and abs(c[2]["y"] - l["y"]) > SIBLING_GAP]
+    if rivals:
+        scored = sorted(((full_score(scrape.norm(title_text(page, c[2])), n), c[2]) for c in [cands[0]] + rivals),
+                        key=lambda x: x[0], reverse=True)
+        if scored[1][0] >= scored[0][0] - 0.02:
+            return None
+        l = scored[0][1]
     y0 = l["y"] - IMG_ABOVE
     if y0 < top or y0 + CARD_IMG > tab:
         return None

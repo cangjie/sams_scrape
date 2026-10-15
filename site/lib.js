@@ -17,14 +17,15 @@
     return n ? n.split(" ") : [];
   }
 
-  // 每个词都要出现在商品名、规格或卖点里。最多返回 limit 条，total 是全部命中数
+  // 每个词都要出现在商品名、规格或卖点里（不管里面的空格）。最多返回 limit 条，total 是全部命中数
   function search(items, q, limit) {
     const max = limit || LIMIT, toks = tokens(q);
     if (!toks.length) return { results: [], total: 0 };
     const results = [];
     let total = 0;
     for (const it of items) {
-      if (it._h === undefined) it._h = normalize([it.n, it.s, it.d].join(" "));
+      // 去掉空格再比：商品名里的空格来自 App 或识别（「东升 香菜」），店员连着打「东升香菜」也要能搜到
+      if (it._h === undefined) it._h = normalize([it.n, it.s, it.d].join(" ")).replace(/ /g, "");
       if (toks.every(t => it._h.includes(t))) {
         total++;
         if (results.length < max) results.push(it);

@@ -102,7 +102,7 @@ def build(out=DIST):
     report["no_image"] = len(missing)
 
     data = site_data.build(products, top_order, sub_order, images, datetime.now().strftime("%Y-%m-%d %H:%M"))
-    problems = site_data.check(data)
+    problems = site_data.check(data, sub_order)
     problems += [f"{it['id']} 的图片不存在：{p}" for it in data["items"] for p in {it["it"], it["il"]}
                  if p and not (out / p).exists()]
     if problems:
@@ -121,9 +121,21 @@ def build(out=DIST):
 
     CACHE.mkdir(exist_ok=True)
     (CACHE / "no_image.txt").write_text("\n".join(missing) + "\n", encoding="utf-8")
+    same = same_image_groups(images)
+    report["same_image"] = len(same)
+    (CACHE / "same_image.txt").write_text("".join(" ".join(g) + "\n" for g in same), encoding="utf-8")
     contact_sheet(crops, CACHE / "contact_sheet.jpg")
     report["data_file"] = data_file
     return report
+
+
+def same_image_groups(images):
+    """用了同一张图（文件名里的内容指纹相同）的商品：[[商品 id, ...], ...]。
+    同系列商品配错图时会出现；生成后写进 cache/same_image.txt 人工看，不算自检失败。"""
+    groups = {}
+    for pid, (thumb, _) in images.items():
+        groups.setdefault(thumb.rsplit("-", 1)[1], []).append(pid)
+    return [g for g in groups.values() if len(g) > 1]
 
 
 def contact_sheet(paths, dest, n=100, size=120):
@@ -168,7 +180,8 @@ def main():
         r = build()
         print(f"商品 {r['products']} 个：京东图 {r['jd_images']}，截图裁图 {r['crops']}，没有图 {r['no_image']}；"
               f"数据 {r['data_file']}")
-        print(f"抽查图：{CACHE / 'contact_sheet.jpg'}；没有图的商品：{CACHE / 'no_image.txt'}")
+        print(f"抽查图：{CACHE / 'contact_sheet.jpg'}；没有图的商品：{CACHE / 'no_image.txt'}；"
+              f"共用同一张图 {r['same_image']} 组：{CACHE / 'same_image.txt'}")
     elif cmd == "publish":
         publish()
     else:

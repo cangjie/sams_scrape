@@ -85,6 +85,25 @@ class SiteDataTest(unittest.TestCase):
         self.assertEqual(data["items"][1]["it"], "")
         self.assertEqual(site_data.check(data), [])
 
+    def test_product_cats_drops_unknown_also(self):
+        """「也在」里有改子分类前留下的 OCR 错字旧名（維包/鞋配、旨骼健康），给了分类表就不算。"""
+        p = product(rec(1, "肉蛋果蔬", "羊肉", also=["火锅食材", "羊肉卷错字"]))
+        self.assertEqual(site_data.product_cats(p, SUBS), [("肉蛋果蔬", "羊肉"), ("肉蛋果蔬", "火锅食材")])
+        self.assertEqual(len(site_data.product_cats(p)), 3)
+
+    def test_build_ignores_unknown_sub(self):
+        a = product(rec(1, "肉蛋果蔬", "羊肉", also=["羊肉卷错字"]))
+        data = site_data.build([a], TOPS, SUBS, {}, "2026-10-15 12:00")
+        self.assertEqual([s["name"] for s in data["cats"][0]["subs"]], ["羊肉"])
+        self.assertEqual(data["items"][0]["c"], [[0, 0]])
+        self.assertEqual(site_data.check(data, SUBS), [])
+
+    def test_check_flags_unknown_sub(self):
+        a = product(rec(1, "肉蛋果蔬", "羊肉"))
+        data = site_data.build([a], TOPS, SUBS, {}, "2026-10-15 12:00")
+        data["cats"][0]["subs"].append({"name": "羊肉卷错字", "n": 0})
+        self.assertTrue(any("羊肉卷错字" in x for x in site_data.check(data, SUBS)))
+
     def test_check_finds_problems(self):
         a = product(rec(1, "肉蛋果蔬", "羊肉"))
         data = site_data.build([a], TOPS, SUBS, {}, "2026-10-15 12:00")

@@ -27,6 +27,13 @@ test("search 每个词都要命中名字、规格或卖点", () => {
   assert.deepStrictEqual(L.search(items, "   "), { results: [], total: 0 });
 });
 
+test("search 不受商品名里空格影响：连着打也能搜到", () => {
+  const xs = [{ id: "b1", n: "东升 香菜", s: "125g", d: "叶鲜茎嫩" }, { id: "b2", n: "洋河52度 海之蓝", s: "1L", d: "" }];
+  assert.deepStrictEqual(L.search(xs, "东升香菜").results.map(i => i.id), ["b1"]);
+  assert.deepStrictEqual(L.search(xs, "香菜125g").results.map(i => i.id), ["b1"]);
+  assert.deepStrictEqual(L.search(xs, "海之蓝1L").results.map(i => i.id), ["b2"]);
+});
+
 test("search 最多返回 LIMIT 条，total 是全部命中数", () => {
   const many = Array.from({ length: 250 }, (_, i) => ({ id: "a" + i, n: "牛奶 " + i, s: "", d: "" }));
   const r = L.search(many, "牛奶");

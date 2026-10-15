@@ -73,6 +73,27 @@ class SiteImagesTest(unittest.TestCase):
         self.assertIsNone(site_images.locate_card(top, "洪湖粉藕 1kg", 739.0))
         self.assertIsNone(site_images.locate_card(bottom, "洪湖粉藕 1kg", 739.0))
 
+    def test_locate_card_same_price_siblings_use_second_line(self):
+        """同一张截图里同系列又同价的两款，标题第一行一样，要拼上第二行再比（审查发现 ASKO 洗衣机配成了烘衣机的图）。"""
+        page = fake_page([(190, 289, 120, "线上专享 ASKO 欧洲进口"), (187, 309, 120, "8kg极光系列烘衣机T108H"),
+                          (190, 373, 50, "¥9,999"),
+                          (188, 619, 120, "ASKO 欧洲进口9kg极光系"), (187, 639, 120, "列洗衣机W109C"),
+                          (189, 703, 50, "¥9,999")])
+        self.assertEqual(site_images.locate_card(page, "ASKO 欧洲进口9kg极光系列洗衣机W109C", 9999.0)["y"], 619)
+        self.assertEqual(site_images.locate_card(page, "ASKO 欧洲进口8kg极光系列烘衣机T108H", 9999.0)["y"], 289)
+
+    def test_locate_card_identical_siblings_returns_none(self):
+        """拼上第二行还分不出来：不配图（占位图比别人的图好）。"""
+        page = fake_page([(186, 412, 100, "BOLON 太阳镜"), (189, 472, 50, "¥499.9"),
+                          (188, 629, 100, "BOLON 太阳镜"), (188, 688, 50, "¥499.9")])
+        self.assertIsNone(site_images.locate_card(page, "BOLON 太阳镜", 499.9))
+
+    def test_locate_card_real_siblings(self):
+        """家电家居/00230.png 里 ASKO 烘衣机和洗衣机都是 ¥9,999，标题第一行一样。"""
+        path = site_images.SHOTS / "家电家居" / "00230.png"
+        page = scrape.Page(site_images.ocr_raw(path), path)
+        self.assertEqual(site_images.locate_card(page, "ASKO 欧洲进口9kg极光系列洗衣机W109C", 9999.0)["y"], 619)
+
     def test_crop_for_cards_the_old_rules_missed(self):
         """这台笔记本（macOS 13）上按原解析规则找不到的真实商品：价格行太矮、标题横坐标差一点、
         标题前多了标签、图片上的字和标题并成一行、全球购卡上没识别出价格。"""

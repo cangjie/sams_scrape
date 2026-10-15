@@ -28,14 +28,17 @@ def out_of_stock(product):
     return bool(product.get("oos")) or any(w in t for t in product.get("tags", []) for w in scrape.STOCK_WORDS)
 
 
-def product_cats(product):
-    """商品所在的 (大类, 子分类)，第一个是主分类。合并进来的每条记录的分类，以及记录上「也在」的子分类都算。"""
+def product_cats(product, known=None):
+    """商品所在的 (大类, 子分类)，第一个是主分类。合并进来的每条记录的分类，以及记录上「也在」的子分类都算。
+    known（抓取时 state.json 的 {(大类, 子分类): 序号}）给出时，不在里面的「也在」子分类不算：那是改子分类前
+    留下的旧名字，有的是 OCR 认错的（「服饰家纺/維包/鞋配」「营养保健/旨骼健康」）。"""
     out = []
     for m in product["members"]:
-        for sub in [m["sub"]] + list(m.get("also", [])):
+        for i, sub in enumerate([m["sub"]] + list(m.get("also", []))):
             key = (m["top"], sub)
-            if sub and key not in out:
-                out.append(key)
+            if not sub or key in out or (i > 0 and known is not None and key not in known):
+                continue
+            out.append(key)
     return out
 
 
@@ -44,7 +47,7 @@ def categories(products, top_order, sub_order):
     顺序按抓取时的顺序；没有商品的子分类不列。"""
     counts = {}
     for p in products:
-        for key in product_cats(p):
+        for key in product_cats(p, sub_order):
             counts[key] = counts.get(key, 0) + 1
     tops = sorted({t for t, _ in counts}, key=lambda t: (top_order.index(t) if t in top_order else 99, t))
     cats, index = [], {}
@@ -68,7 +71,7 @@ def to_item(product, index, image):
         "t": split_tags(product.get("tags", [])),
         "x": 1 if product.get("jisuda") else 0,
         "o": 1 if out_of_stock(product) else 0,
-        "c": [list(index[k]) for k in product_cats(product)],
+        "c": [list(index[k]) for k in product_cats(product) if k in index],
         "it": image[0] if image else "",
         "il": image[1] if image else "",
     }
@@ -87,8 +90,8 @@ def build(products, top_order, sub_order, images, generated):
     return {"meta": meta, "cats": cats, "items": items}
 
 
-def check(data):
-    """生成后的自检。返回问题列表，空列表表示通过。"""
+def check(data, known=None):
+    """生成后的自检。返回问题列表，空列表表示通过。known 是抓取时的分类表，给出时子分类必须在里面。"""
     problems, ids, seen = [], set(), {}
     for it in data["items"]:
         if it["id"] in ids:
@@ -104,6 +107,8 @@ def check(data):
             seen[(ti, si)] = seen.get((ti, si), 0) + 1
     for ti, top in enumerate(data["cats"]):
         for si, sub in enumerate(top["subs"]):
+            if known is not None and (top["name"], sub["name"]) not in known:
+                problems.append(f"{top['name']}/{sub['name']} 不在抓取时的分类表里")
             if seen.get((ti, si), 0) != sub["n"]:
                 problems.append(f"{top['name']}/{sub['name']} 商品数 {sub['n']}，实际 {seen.get((ti, si), 0)}")
     return problems

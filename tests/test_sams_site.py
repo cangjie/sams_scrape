@@ -22,6 +22,12 @@ class SamsSiteTest(unittest.TestCase):
         html = sams_site.render_index((ROOT / "site" / "index.html").read_text(encoding="utf-8"), "c", "j", "d")
         self.assertNotIn("{{", html)
 
+    def test_same_image_groups(self):
+        images = {"a1": ("img/t/a1-aaaa1111.jpg", "img/l/a1-aaaa1111.jpg"),
+                  "a2": ("img/t/a2-aaaa1111.jpg", "img/t/a2-aaaa1111.jpg"),
+                  "a3": ("img/t/a3-bbbb2222.jpg", "img/t/a3-bbbb2222.jpg")}
+        self.assertEqual(sams_site.same_image_groups(images), [["a1", "a2"]])
+
     def test_stage_gzips_json_only(self):
         import gzip
         import tempfile
