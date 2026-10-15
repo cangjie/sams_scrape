@@ -75,3 +75,13 @@
   07:57 一次页面没打开（没查清是网络还是验证页）。6 个半小时补了 75 个。看不出能预测的规律，只有凌晨 4～5 点明显顺。
 - 不要做的事：被挡后分钟级重试（会被收得更紧）；把 iframe 拉高让页面自己成批取价；连着失败时不换对象验证就认定「被封了」。
 - 同一个 iframe 里连着第三次 403，京东会把它跳去别的域名（多半是验证页）。遇到验证页要本人处理。
+
+## 商品查询网页（https://mini.snowmeet.top/sams/）
+
+- 设计：`docs/superpowers/specs/2026-10-15-sams-h5-design.md`；计划：`docs/superpowers/plans/2026-10-15-sams-h5.md`
+- 生成：`/usr/local/bin/python3 sams_site.py build` → `dist/`（要在命令沙箱外运行；第一次要识别截图，较慢，识别结果按截图内容缓存在 `cache/ocr/`）
+- 抽查：生成后看 `cache/contact_sheet.jpg`（随机 100 张裁图）和 `cache/no_image.txt`（没有图的商品）
+- 发布：`/usr/local/bin/python3 sams_site.py publish` → S3 `upload/sams/`
+- 以后重新抓了数据：更新 `data/items.jsonl`、`data/jd_items.jsonl`（和截图、京东主图）后，再执行生成和发布即可，不用动网页、nginx、SnowmeetApi
+- Intel 电脑用 `bin/analyze-x86_64`（由 `src/analyze.swift` 编译）；Mac mini 用 `bin/analyze`
+- `tests/test_regression.py` 针对 2026-10-15 的数据快照；重新抓取后，按新导出的 Excel 更新里面的期望数字
