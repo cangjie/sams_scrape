@@ -85,3 +85,5 @@
 - 以后重新抓了数据：更新 `data/items.jsonl`、`data/jd_items.jsonl`（和截图、京东主图）后，再执行生成和发布即可，不用动网页、nginx、SnowmeetApi
 - Intel 电脑用 `bin/analyze-x86_64`（由 `src/analyze.swift` 编译）；Mac mini 用 `bin/analyze`
 - `tests/test_regression.py` 针对 2026-10-15 的数据快照；重新抓取后，按新导出的 Excel 更新里面的期望数字
+- nginx：mini 服务器 `/etc/nginx/sites-available/default`（`sites-enabled/default` 指向它）里 `mini.snowmeet.top` 的 443 块，由 `deploy/nginx_sams.py add … 'location /ws {' 127.0.0.53` 在 `location /ws {` 前加了 `/sams` 两段规则（2026-10-15），备份在 `/etc/nginx/sites-available/default.bak-20261015-sams`。撤回：`ssh … "sudo python3 - remove /etc/nginx/sites-available/default" < deploy/nginx_sams.py`，再 `sudo nginx -t && sudo systemctl reload nginx`
+- 验收时注意：SnowmeetApi 对 HEAD 请求（`curl -I`）的 Swagger 本来就返回 404，要用 GET 检查
