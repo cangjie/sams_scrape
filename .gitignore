@@ -5,3 +5,5 @@ __pycache__/
 data/*.log
 data/jd_browser_state.prev.json
 data/山姆商品_暂存_20261013-0728备份.xlsx
+dist/
+cache/

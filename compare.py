@@ -155,9 +155,9 @@ def jd_price(it):
         return None
 
 
-def compare(app_items, jd_items):
-    """返回 (只在 App 的, 只在京东的, 认成同一个的对数)。
-    前两个是列表，每项 (商品, 对面最像的商品或 None, 相似度)。"""
+def match(app_items, jd_items):
+    """认成同一个的配对 [(App 序号, 京东序号, 名字相似度)]，以及每个商品「对面最像的那个」：
+    near_a / near_j 是 {序号: (排序用的分, 相似度, 对面序号)}。"""
     A = [Side(it["title"], it.get("price")) for it in app_items]
     J = [Side(it["name"], jd_price(it)) for it in jd_items]
     df = collections.Counter(g for x in A + J for g in x.gfull | x.gcjk)
@@ -188,7 +188,7 @@ def compare(app_items, jd_items):
                 x, y = sorted((a.cjk or a.full, j.cjk or j.full), key=len)
                 sure = (eq and bool(a.nums and j.nums) and (a.nums <= j.nums_all or j.nums <= a.nums_all)
                         and (s >= 0.70 or (s >= 0.50 and sum(c in y for c in x) / len(x) >= 0.85)))
-                ok.append((s + (0.3 if eq else 0) + (0.05 if a.mm and j.mm else 0), i, k, sure))
+                ok.append((s + (0.3 if eq else 0) + (0.05 if a.mm and j.mm else 0), i, k, sure, s))
             rank = s + (0.2 if eq else 0)
             if rank > near_a.get(i, (0,))[0]:
                 near_a[i] = (rank, s, k)
@@ -197,12 +197,19 @@ def compare(app_items, jd_items):
     # 从最像的一对开始认。一个商品认上之后，只再接受跟它那一对差不多像的、或者十拿九稳的（App 里同一商品挂在几个大类下、京东的 M/L 码）；
     # 最像的对象被别人认走了的，还能退而认下一个够格的（12 年威士忌 ↔ 12 年威士忌，而不是都挤到普通款上）。
     pairs, got_a, got_j = [], {}, {}
-    for r, i, k, sure in sorted(ok, reverse=True):
+    for r, i, k, sure, s in sorted(ok, reverse=True):
         if sure or (r >= got_a.get(i, 0) - 0.15 and r >= got_j.get(k, 0) - 0.15):
-            pairs.append((i, k))
+            pairs.append((i, k, s))
             got_a.setdefault(i, r)
             got_j.setdefault(k, r)
-    hit_a, hit_j = {i for i, _ in pairs}, {k for _, k in pairs}
+    return pairs, near_a, near_j
+
+
+def compare(app_items, jd_items):
+    """返回 (只在 App 的, 只在京东的, 认成同一个的对数)。
+    前两个是列表，每项 (商品, 对面最像的商品或 None, 相似度)。"""
+    pairs, near_a, near_j = match(app_items, jd_items)
+    hit_a, hit_j = {i for i, _, _ in pairs}, {k for _, k, _ in pairs}
     app_only = [(it, jd_items[near_a[i][2]] if i in near_a else None, near_a[i][1] if i in near_a else 0.0)
                 for i, it in enumerate(app_items) if i not in hit_a]
     jd_only = [(it, app_items[near_j[k][2]] if k in near_j else None, near_j[k][1] if k in near_j else 0.0)

@@ -418,6 +418,41 @@ def merged_items():
     return out
 
 
+def category_order(state=None):
+    """(大类顺序, {(大类, 子分类): 序号})，按抓取时 state.json 里的顺序。"""
+    state = load_state() if state is None else state
+    order = {}
+    for top, st in state.get("tops", {}).items():
+        for i, s in enumerate(st.get("subs", [])):
+            order[(top, s)] = i
+    return list(state.get("tops", {})), order
+
+
+def unique_items(items=None, state=None):
+    """按分类顺序排好、合并重复后的商品（Excel「商品」表就是它）。
+    App 是按大类抓的，同一个商品会挂在几个大类下（个护美妆 + 全球购、乳品烘焙 + 营养早餐……），各抓到一次。
+    标题和价格都一样的只留一个（排在前面的那个大类），别的分类记在 dup 里；极速达 / 无货有一处是就算是；标签合并。
+    members 是合并进来的全部原始记录（含第一条）。"""
+    items = merged_items() if items is None else items
+    tops, order = category_order(state)
+    items = sorted(items, key=lambda it: (tops.index(it["top"]) if it["top"] in tops else 99,
+                                          order.get((it["top"], it["sub"]), 999), it["id"]))
+    uniq, seen = [], {}
+    for it in items:
+        key = (norm(it["title"]), it["price"])
+        if key in seen:
+            first = seen[key]
+            first["dup"].append(f"{it['top']}/{it['sub']}")
+            first["members"].append(it)
+            first["jisuda"] = first.get("jisuda") or it.get("jisuda")
+            first["oos"] = first.get("oos") or it.get("oos")
+            first["tags"] = first.get("tags", []) + [t for t in it.get("tags", []) if t not in first.get("tags", [])]
+            continue
+        seen[key] = dict(it, dup=[], tags=list(it.get("tags", [])), members=[it])
+        uniq.append(seen[key])
+    return uniq
+
+
 class Store:
     """已抓到的商品。同一商品会在相邻两页、不同子分类里重复出现，这里去重。"""
 
@@ -472,26 +507,7 @@ def export():
 
     items = merged_items()
     state = load_state()
-    order = {}
-    for top, st in state.get("tops", {}).items():
-        for i, s in enumerate(st.get("subs", [])):
-            order[(top, s)] = i
-    tops = list(state.get("tops", {}))
-    items.sort(key=lambda it: (tops.index(it["top"]) if it["top"] in tops else 99, order.get((it["top"], it["sub"]), 999), it["id"]))
-    # App 是按大类抓的，同一个商品会挂在几个大类下（个护美妆 + 全球购、乳品烘焙 + 营养早餐……），各抓到一次。
-    # 标题和价格都一样的只留一行（排在前面的那个大类），别的分类记在「其他所在分类」里；极速达 / 无货有一处是就算是。
-    uniq, seen = [], {}
-    for it in items:
-        key = (norm(it["title"]), it["price"])
-        if key in seen:
-            first = seen[key]
-            first["dup"].append(f"{it['top']}/{it['sub']}")
-            first["jisuda"] = first.get("jisuda") or it.get("jisuda")
-            first["oos"] = first.get("oos") or it.get("oos")
-            first["tags"] = first.get("tags", []) + [t for t in it.get("tags", []) if t not in first.get("tags", [])]
-            continue
-        seen[key] = dict(it, dup=[], tags=list(it.get("tags", [])))
-        uniq.append(seen[key])
+    uniq = unique_items(items, state)
 
     wb = Workbook()
     ws = wb.active
