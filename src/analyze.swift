@@ -35,8 +35,8 @@ let info = CGImageAlphaInfo.premultipliedLast.rawValue
 
 // 识别模型的版本。默认用第 2 版：第 3 版（系统默认）每次加载模型要 20 多秒，而这台机器磁盘紧张，
 // 系统会反复清掉它的模型缓存；第 2 版加载只要 2 秒左右，识别结果基本一样。环境变量 SAMS_OCR_REV=3 可切回。
-let ocrRevision = ProcessInfo.processInfo.environment["SAMS_OCR_REV"] == "3"
-    ? VNRecognizeTextRequestRevision3 : VNRecognizeTextRequestRevision2
+// 用数字而不是 VNRecognizeTextRequestRevision2/3 常量：老的 SDK（10.15）里没有这两个常量，运行时的系统是认的
+let ocrRevision: Int = ProcessInfo.processInfo.environment["SAMS_OCR_REV"] == "3" ? 3 : 2
 
 func makeRequest() -> VNRecognizeTextRequest {
     let req = VNRecognizeTextRequest()
@@ -45,6 +45,7 @@ func makeRequest() -> VNRecognizeTextRequest {
     req.recognitionLanguages = ["zh-Hans", "en-US"]
     req.usesLanguageCorrection = false
     // 只用 CPU：神经引擎的编译服务忙的时候，识别要排队等很久
+    #if compiler(>=5.9)
     if #available(macOS 14.0, *) {
         if let stages = try? req.supportedComputeStageDevices {
             for (stage, devices) in stages {
@@ -56,6 +57,9 @@ func makeRequest() -> VNRecognizeTextRequest {
     } else {
         req.usesCPUOnly = true
     }
+    #else
+    req.usesCPUOnly = true                // 老编译器（macOS 14 以前的 SDK）没有按阶段选设备的接口
+    #endif
     return req
 }
 
@@ -117,11 +121,11 @@ func analyze(_ path: String, _ up: Int) throws -> Data {
     }
 
     var lines: [Line] = []
-    for o in req.results ?? [] {
+    for o in (req.results as? [VNRecognizedTextObservation]) ?? [] {
         guard let c = o.topCandidates(1).first else { continue }
         let b = o.boundingBox
-        let x = Int(b.minX * Double(W)), y = Int((1 - b.maxY) * Double(H))
-        let w = Int(b.width * Double(W)), h = Int(b.height * Double(H))
+        let x = Int(Double(b.minX) * Double(W)), y = Int((1 - Double(b.maxY)) * Double(H))
+        let w = Int(Double(b.width) * Double(W)), h = Int(Double(b.height) * Double(H))
         let (fg, bg) = colors(x, y, w, h)
         lines.append(Line(x: x, y: y, w: w, h: h, conf: c.confidence, text: c.string, fg: fg, bg: bg))
     }

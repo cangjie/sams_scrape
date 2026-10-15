@@ -23,6 +23,7 @@ import argparse
 import difflib
 import json
 import os
+import platform
 import random
 import re
 import subprocess
@@ -33,6 +34,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 BIN = ROOT / "bin"
+# 识别程序：Mac mini（arm64）用 bin/analyze；Intel 笔记本用 bin/analyze-x86_64（用 src/analyze.swift 在本机编译）
+ANALYZE = BIN / ("analyze-x86_64" if platform.machine() == "x86_64" else "analyze")
 DATA = ROOT / "data"
 STATE = DATA / "state.json"
 ITEMS = DATA / "items.jsonl"
@@ -205,7 +208,7 @@ class Ocr:
     def ask(cls, path, timeout=180):
         import select
         if cls.proc is None or cls.proc.poll() is not None:
-            cls.proc = subprocess.Popen([str(BIN / "analyze"), "--serve", "3"], stdin=subprocess.PIPE,
+            cls.proc = subprocess.Popen([str(ANALYZE), "--serve", "3"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
             cls.proc.stdin.write((str(path) + "\n").encode("utf-8"))
@@ -234,7 +237,8 @@ class Ocr:
 OCR_CACHE = Path.home() / "Library" / "Caches" / "analyze"
 
 
-def analyze(path):
+def analyze_raw(path):
+    """识别一张截图，返回 bin/analyze 的原始结果（dict）；识别失败返回 None。"""
     t = time.time()
     raw = Ocr.ask(path)
     if raw is not None and "error" in raw:
@@ -249,7 +253,12 @@ def analyze(path):
         log(f"  ⚠ 这一页识别用了 {time.time() - t:.0f} 秒（识别模型刚加载时会这样）")
     if raw is None or "error" in raw:
         return None
-    return Page(raw, path)
+    return raw
+
+
+def analyze(path):
+    raw = analyze_raw(path)
+    return None if raw is None else Page(raw, path)
 
 
 def snap(win, path):
