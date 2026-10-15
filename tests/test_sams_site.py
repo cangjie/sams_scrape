@@ -22,6 +22,19 @@ class SamsSiteTest(unittest.TestCase):
         html = sams_site.render_index((ROOT / "site" / "index.html").read_text(encoding="utf-8"), "c", "j", "d")
         self.assertNotIn("{{", html)
 
+    def test_stage_gzips_json_only(self):
+        import gzip
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            src, dst = Path(d) / "dist", Path(d) / "stage"
+            (src / "data").mkdir(parents=True)
+            (src / "data" / "products.abc.json").write_bytes(b'{"a":1}')
+            (src / "index.html").write_bytes(b"<html>")
+            sams_site.stage(src, dst)
+            self.assertEqual(gzip.decompress((dst / "data" / "products.abc.json").read_bytes()), b'{"a":1}')
+            self.assertEqual((dst / "index.html").read_bytes(), b"<html>")
+            self.assertEqual((src / "data" / "products.abc.json").read_bytes(), b'{"a":1}')   # dist/ 本身不动
+
 
 if __name__ == "__main__":
     unittest.main()

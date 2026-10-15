@@ -5,10 +5,12 @@
   sams_site.py build      由 data/ 生成 dist/（数据文件、商品图、页面）。第一次要识别约两千张截图，之后用 cache/ocr/ 的缓存
   sams_site.py publish    把 dist/ 同步到 S3 的 upload/sams/（经美国服务器 2222 → mini 服务器）
 """
+import gzip
 import hashlib
 import json
 import random
 import shutil
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +27,23 @@ import site_images  # noqa: E402
 SRC = ROOT / "site"
 DIST = ROOT / "dist"
 CACHE = ROOT / "cache"
+HOST = "ubuntu@44.207.251.65"                         # 美国服务器，2222 端口转发到 mini 服务器的 22
+SSH = ["ssh", "-o", "HostKeyAlias=161.189.64.210", "-o", "IdentitiesOnly=yes",
+       "-i", str(Path.home() / ".ssh" / "id_rsa"), "-p", "2222"]
+REMOTE_DIR = "sams-upload"                            # mini 服务器上的临时目录（~/sams-upload），传完删掉
+BUCKET = "s3://snowmeet-uploads-673751646617-cn-northwest-1-an/upload/sams"
+LONG = "public, max-age=31536000, immutable"
+# 先传图片、数据、js、css，最后传 index.html：index.html 一换，它引用的新文件已经在桶里了
+REMOTE_SCRIPT = f"""set -e
+cd ~/{REMOTE_DIR}
+R="--region cn-northwest-1"
+aws s3 sync img {BUCKET}/img $R --size-only --content-type image/jpeg --cache-control "{LONG}"
+aws s3 cp data {BUCKET}/data $R --recursive --content-type "application/json; charset=utf-8" --content-encoding gzip --cache-control "{LONG}"
+for f in app.*.js; do aws s3 cp "$f" "{BUCKET}/$f" $R --content-type "application/javascript; charset=utf-8" --cache-control "{LONG}"; done
+for f in app.*.css; do aws s3 cp "$f" "{BUCKET}/$f" $R --content-type "text/css; charset=utf-8" --cache-control "{LONG}"; done
+aws s3 cp index.html {BUCKET}/index.html $R --content-type "text/html; charset=utf-8" --cache-control "no-cache"
+cd ~ && rm -rf ~/{REMOTE_DIR}
+"""
 
 
 def fingerprint(data):
@@ -123,6 +142,26 @@ def contact_sheet(paths, dest, n=100, size=120):
     sheet.save(dest, quality=85)
 
 
+def stage(src, dst):
+    """要上传的副本：和 dist/ 一样，只是 data/*.json 换成 gzip 压缩后的字节（上传时带 Content-Encoding: gzip）。"""
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+    for p in (dst / "data").glob("*.json"):
+        p.write_bytes(gzip.compress(p.read_bytes(), mtime=0))
+
+
+def publish():
+    if not (DIST / "index.html").exists():
+        raise SystemExit("dist/ 还没生成，先运行 sams_site.py build")
+    staging = CACHE / "upload"
+    stage(DIST, staging)
+    subprocess.run(["rsync", "-rlt", "--delete", "-e", " ".join(SSH), f"{staging}/", f"{HOST}:{REMOTE_DIR}/"], check=True)
+    subprocess.run(SSH + [HOST, "bash -s"], input=REMOTE_SCRIPT.encode("utf-8"), check=True)
+    shutil.rmtree(staging)
+    print("已同步到 https://img.snowmeet.top/upload/sams/")
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "build":
@@ -130,6 +169,8 @@ def main():
         print(f"商品 {r['products']} 个：京东图 {r['jd_images']}，截图裁图 {r['crops']}，没有图 {r['no_image']}；"
               f"数据 {r['data_file']}")
         print(f"抽查图：{CACHE / 'contact_sheet.jpg'}；没有图的商品：{CACHE / 'no_image.txt'}")
+    elif cmd == "publish":
+        publish()
     else:
         print(__doc__)
         sys.exit(2)
