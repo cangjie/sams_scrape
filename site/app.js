@@ -60,7 +60,7 @@
 
   function bindSearch(input) {
     input.form.addEventListener("submit", e => { e.preventDefault(); input.blur(); });
-    input.addEventListener("input", () => {
+    const schedule = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
         const href = L.searchHref(input.value), onSearch = L.parseRoute(location.hash).page === "search";
@@ -68,7 +68,10 @@
         if (href === "#/" && onSearch && depth() > 0) history.back();   // 清空了搜索词：回到来时的首页
         else go(href, onSearch);                                          // 从首页开始搜记一条历史，之后的输入只替换它
       }, 250);
-    });
+    };
+    // 拼音还没选字时（isComposing）不搜，不然会拿「yangh」去搜、闪一下「没有找到」；选完字（compositionend）再搜
+    input.addEventListener("input", e => { if (!e.isComposing) schedule(); });
+    input.addEventListener("compositionend", schedule);
   }
 
   function category(r) {

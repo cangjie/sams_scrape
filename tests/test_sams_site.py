@@ -28,6 +28,12 @@ class SamsSiteTest(unittest.TestCase):
                   "a3": ("img/t/a3-bbbb2222.jpg", "img/t/a3-bbbb2222.jpg")}
         self.assertEqual(sams_site.same_image_groups(images), [["a1", "a2"]])
 
+    def test_jd_picks_one_app_product_per_jd_item(self):
+        """一个京东商品只给名字最像的 App 商品用主图（「MM 进口椰子水」和「三麟 进口 椰子水」配上了同一个京东商品）；
+        一个 App 商品配上几个京东商品时取最像的。"""
+        pairs = [(0, 5, 0.9), (1, 5, 0.7), (1, 6, 0.8), (2, 7, 0.95), (2, 8, 0.6), (3, 5, 0.85)]
+        self.assertEqual(sams_site.jd_picks(pairs), {0: 5, 1: 6, 2: 7})
+
     def test_stage_gzips_json_only(self):
         import gzip
         import tempfile

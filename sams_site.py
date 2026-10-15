@@ -68,18 +68,15 @@ def build(out=DIST):
     products = scrape.unique_items()
     top_order, sub_order = scrape.category_order()
 
-    # 配上京东的商品用京东主图（一个 App 商品配上几个京东商品时，取名字最像的那个）
+    # 配上京东的商品用京东主图（规则见 jd_picks）
     jds = jd.jd_items()
-    best = {}                                                # 商品下标 → (相似度, 京东商品)
-    for i, k, s in compare.match(products, jds)[0]:
-        if s > best.get(i, (0.0, None))[0]:
-            best[i] = (s, jds[k])
+    picks = jd_picks(compare.match(products, jds)[0])       # App 商品下标 → 京东商品下标
 
     images, crops, missing = {}, [], []
     report = {"products": len(products), "jd_images": 0, "crops": 0}
     for i, p in enumerate(products):
         pid = site_data.product_id(p)
-        src = jd.image_path(best[i][1]) if i in best else None
+        src = jd.image_path(jds[picks[i]]) if i in picks else None
         if src is not None and src.exists():
             v = site_images.jd_versions(src)
             name = site_images.named(pid, v["l"])
@@ -127,6 +124,21 @@ def build(out=DIST):
     contact_sheet(crops, CACHE / "contact_sheet.jpg")
     report["data_file"] = data_file
     return report
+
+
+def jd_picks(pairs):
+    """京东主图给谁用：{App 商品下标: 京东商品下标}。pairs 是 compare.match 的 [(App 下标, 京东下标, 相似度)]。
+    一个京东商品只给名字最像的那个 App 商品用：配对允许几个 App 商品对上同一个京东商品，其中可能有别的牌子
+    （「MM 进口椰子水」和「三麟 进口 椰子水」），用错图不如用各自截图里的图。一个 App 商品配上几个京东商品时取最像的。"""
+    best_app = {}                                            # 京东下标 → (相似度, App 下标)
+    for i, k, s in pairs:
+        if s > best_app.get(k, (-1.0, None))[0]:
+            best_app[k] = (s, i)
+    picks = {}                                               # App 下标 → (相似度, 京东下标)
+    for k, (s, i) in best_app.items():
+        if s > picks.get(i, (-1.0, None))[0]:
+            picks[i] = (s, k)
+    return {i: k for i, (_, k) in picks.items()}
 
 
 def same_image_groups(images):
