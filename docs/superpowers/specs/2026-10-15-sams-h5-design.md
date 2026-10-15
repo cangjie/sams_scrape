@@ -46,8 +46,8 @@
 ## 4. 架构
 
 ```
-生成（本机）：data/*.jsonl + data/jd_images + data/shots + site/ ──site.py build──→ dist/
-发布：        dist/ ──site.py publish（经 mini 服务器）──→ S3 桶 upload/sams/
+生成（本机）：data/*.jsonl + data/jd_images + data/shots + site/ ──sams_site.py build──→ dist/
+发布：        dist/ ──sams_site.py publish（经 mini 服务器）──→ S3 桶 upload/sams/
 访问：        手机 → https://mini.snowmeet.top/sams/ → mini 服务器 nginx → img.snowmeet.top（CloudFront）→ S3 upload/sams/
 ```
 
@@ -55,10 +55,10 @@
 
 | 部分 | 位置 | 做什么 |
 |---|---|---|
-| 网页源码 | `site/index.html`、`site/app.js`、`site/app.css` | 单页应用，纯 HTML/CSS/JS，不用框架 |
-| 生成脚本 | `site.py build` | 读 jsonl，去重、配对，生成数据文件和图片，输出到 `dist/` |
-| 裁图 | `site.py` 调用 `bin/analyze` | 从 App 截图里定位商品卡、裁出商品图 |
-| 发布脚本 | `site.py publish` | 把 `dist/` 传到 mini 服务器临时目录，再同步进 S3，最后删掉临时目录 |
+| 网页源码 | `site/index.html`、`site/lib.js`、`site/app.js`、`site/app.css` | 单页应用，纯 HTML/CSS/JS，不用框架 |
+| 生成脚本 | `sams_site.py build` | 读 jsonl，去重、配对，生成数据文件和图片，输出到 `dist/` |
+| 裁图 | `sams_site.py` 调用 `bin/analyze` | 从 App 截图里定位商品卡、裁出商品图 |
+| 发布脚本 | `sams_site.py publish` | 把 `dist/` 传到 mini 服务器临时目录，再同步进 S3，最后删掉临时目录 |
 | 访问入口 | mini 服务器 nginx | 把 `/sams/` 转给 `img.snowmeet.top/upload/sams/` |
 
 `dist/` 是生成结果，不进 Git。
@@ -164,7 +164,7 @@
 - 生成后输出一张随机 100 张的总览图，供人工抽查。
 - 裁不出来的商品，`it`/`il` 留空，页面显示占位图。脚本最后报告数量。
 
-**增量**：只处理新出现或内容变了的商品，已有的图片不重算。
+**增量**：截图的识别结果按截图内容缓存在 `cache/ocr/`，重新生成时只识别新的或内容变了的截图，其余直接用缓存；图片文件名带内容指纹，上传时只传新出现的文件。
 
 ## 8. 发布
 
@@ -196,33 +196,35 @@
 
 ```nginx
 location = /sams { return 301 /sams/; }
-location = /sams/ {
-    proxy_pass https://img.snowmeet.top/upload/sams/index.html;
+location ^~ /sams/ {
+    resolver <服务器的 DNS> valid=300s ipv6=off;
+    set $sams_origin img.snowmeet.top;
+    rewrite ^/sams/$ /upload/sams/index.html break;
+    rewrite ^/sams/(.*)$ /upload/sams/$1 break;
+    proxy_pass https://$sams_origin;
     proxy_set_header Host img.snowmeet.top;
     proxy_ssl_server_name on;
-}
-location /sams/ {
-    proxy_pass https://img.snowmeet.top/upload/sams/;
-    proxy_set_header Host img.snowmeet.top;
-    proxy_ssl_server_name on;
+    proxy_ssl_name img.snowmeet.top;
 }
 ```
 
+- `^~` 让 `/sams/` 优先于 server 块里按扩展名匹配的正则规则（如图片缓存规则），否则图片请求会被那些规则截走。
+- `proxy_pass` 用变量，nginx 才会按 `resolver` 在运行时重新解析域名。直接写域名只在启动时解析一次，CloudFront 换 IP 后就转发不到了。`<服务器的 DNS>` 取 mini 服务器 `/etc/resolv.conf` 里的地址。
 - 改之前备份原配置文件，`nginx -t` 通过后 `reload`。
-- 撤回：删掉这三段，`nginx -t`，`reload`。
+- 撤回：删掉这两段，`nginx -t`，`reload`。
 - **执行前先把实际改动给用户看，用户同意后才改。** 这是生产服务器上唯一的改动，不涉及 SnowmeetApi。
 
 ### 8.3 以后更新数据
 
 1. 重新抓取，`items.jsonl` / `jd_items.jsonl` 更新。
-2. `python3 site.py build`：重新生成数据文件，只为新的或变了的商品生成图片。
-3. `python3 site.py publish`：同步到 S3。
+2. `python3 sams_site.py build`：重新生成数据文件和图片；只有新的或变了的截图需要重新识别。
+3. `python3 sams_site.py publish`：同步到 S3。
 
 网页代码、nginx、SnowmeetApi 都不用动。
 
 ## 9. 测试
 
-**生成脚本自检**（`site.py build` 结束时执行，失败就不产出）
+**生成脚本自检**（`sams_site.py build` 结束时执行，失败就不产出）
 - 商品数等于去重后的数量（当前 4604）。
 - 每个商品都有名称、价格和至少一个分类。
 - 每个分类的商品数与 `cats` 里的 `n` 一致。
